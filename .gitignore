@@ -20,3 +20,5 @@ wheels/
 
 # JavaScript dependencies and generated output
 node_modules/
+
+data/
