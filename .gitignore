@@ -1,0 +1,22 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# macOS metadata
+.DS_Store
+**/.DS_Store
+
+# Local secrets
+.env
+.env.*
+!.env.example
+
+# JavaScript dependencies and generated output
+node_modules/
