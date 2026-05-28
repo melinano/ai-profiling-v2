@@ -21,4 +21,5 @@ wheels/
 # JavaScript dependencies and generated output
 node_modules/
 
-data/
+# Imported local data
+/data/
