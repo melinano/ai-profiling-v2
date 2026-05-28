@@ -9,6 +9,9 @@ expected profiles.
 Database and entity reference:
 
 - [docs/database.md](docs/database.md)
+- [docs/interview-answer-json.md](docs/interview-answer-json.md)
+- [docs/web-app-todo.md](docs/web-app-todo.md)
+- [docs/schemas/interview-answer-payload.schema.json](docs/schemas/interview-answer-payload.schema.json)
 
 Create a `.env` file with:
 
