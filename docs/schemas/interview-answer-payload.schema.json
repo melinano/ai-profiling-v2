@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-profiling.local/schemas/interview-answer-payload.schema.json",
+  "title": "Interview answer payload",
+  "description": "Draft/submitted questionnaire answer payload used by the web MVP. Drafts may be partial; submitted payloads should pass application-level completeness validation against the questionnaire config.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["profileId", "answers", "currentQuestionId", "updatedAt"],
+  "properties": {
+    "profileId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "answers": {
+      "$ref": "#/$defs/answersState"
+    },
+    "currentQuestionId": {
+      "type": "string",
+      "description": "Question id that should be opened when the draft is restored."
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "submittedAt": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "$defs": {
+    "answersState": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "section_1_position_title": { "type": "string" },
+        "section_1_org_path": { "type": "string" },
+        "section_1_admin_manager": { "type": "string" },
+        "section_1_functional_manager": { "$ref": "#/$defs/conditionalAnswer" },
+        "section_1_direct_reports": { "$ref": "#/$defs/conditionalAnswer" },
+        "section_1_total_reports": { "type": "string" },
+        "section_1_total_reports_occupied_fte": { "type": "string" },
+        "section_1_functional_reports": { "$ref": "#/$defs/conditionalAnswer" },
+        "section_1_completion_date": { "type": "string", "format": "date" },
+
+        "section_2_position_goal": { "type": "string" },
+
+        "section_3_responsibilities": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/cardAnswer" }
+        },
+
+        "section_4_1_revenue_responsibility": { "$ref": "#/$defs/conditionalAnswer" },
+        "section_4_2_expense_budget": { "$ref": "#/$defs/groupAnswer" },
+
+        "section_5_1_task_typicality": { "type": "string" },
+        "section_5_2_complex_task_example": { "type": "string" },
+
+        "section_6_1_external_interactions": { "$ref": "#/$defs/conditionalAnswer" },
+        "section_6_2_internal_interactions": { "$ref": "#/$defs/conditionalAnswer" },
+        "section_6_3_government_interactions": { "$ref": "#/$defs/conditionalAnswer" },
+
+        "section_7_1_independent_decisions": { "type": "string" },
+        "section_7_2_approved_decisions": { "type": "string" },
+
+        "section_8_1_education": { "type": "string" },
+        "section_8_2_specialization": { "type": "string" },
+        "section_8_3_certification": { "$ref": "#/$defs/conditionalAnswer" },
+        "section_8_4_knowledge_skills": { "$ref": "#/$defs/groupAnswer" },
+        "section_8_5_experience": { "$ref": "#/$defs/groupAnswer" },
+
+        "section_9_comments": { "$ref": "#/$defs/conditionalAnswer" }
+      }
+    },
+    "conditionalAnswer": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "choice": { "type": "string" },
+        "details": {
+          "oneOf": [
+            { "type": "string" },
+            { "$ref": "#/$defs/groupAnswer" },
+            {
+              "type": "array",
+              "items": { "$ref": "#/$defs/cardAnswer" }
+            }
+          ]
+        }
+      }
+    },
+    "groupAnswer": {
+      "type": "object",
+      "additionalProperties": {
+        "oneOf": [
+          { "type": "string" },
+          {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        ]
+      }
+    },
+    "cardAnswer": {
+      "type": "object",
+      "additionalProperties": {
+        "oneOf": [
+          { "type": "string" },
+          {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        ]
+      }
+    }
+  }
+}

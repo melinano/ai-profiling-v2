@@ -44,6 +44,16 @@ DATABASE_URL=postgres://...
 
 The frontend should implement a clear profiling workflow, not a free-form chatbot interface. The user experience should feel like a guided questionnaire / wizard.
 
+Validation in the questionnaire must be explicit and local to the problem.
+If a required answer, required conditional detail, or required card list blocks
+navigation or submission, the UI must clearly identify the exact block that
+needs attention. Do not rely only on a generic status line or disabled action.
+The affected question/card should be visually highlighted, the page should move
+the user to it when practical, and the message should state the concrete next
+step, for example: add a card and fill it in, or choose "No" if the condition is
+not applicable. This rule is important because the questionnaire must remain
+usable for non-technical and older users.
+
 ### Backend
 
 - Bun

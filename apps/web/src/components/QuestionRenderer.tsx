@@ -1,4 +1,5 @@
 import { Plus, Trash2 } from "lucide-react";
+import type React from "react";
 import { createEmptyCard } from "../lib/questionnaire";
 import type {
   AnswerValue,
@@ -10,21 +11,40 @@ import type {
   HelpContent,
   QuestionConfig
 } from "../types/questionnaire";
+import type { PositionSuggestion } from "../types/directory";
 import { FieldInput } from "./FieldInput";
+
+type FieldAutocompleteContext = {
+  cardIndex?: number;
+  field: FieldConfig;
+  question: QuestionConfig;
+};
 
 type QuestionRendererProps = {
   question: QuestionConfig;
   value: AnswerValue | undefined;
   onChange: (value: AnswerValue) => void;
   onHelpChange: (help: HelpContent) => void;
+  renderQuestionInput?: (question: QuestionConfig) => React.ReactNode;
+  onFieldPositionSelect?: (
+    context: FieldAutocompleteContext,
+    position: PositionSuggestion
+  ) => void;
 };
 
 export function QuestionRenderer({
   question,
   value,
   onChange,
-  onHelpChange
+  onHelpChange,
+  renderQuestionInput,
+  onFieldPositionSelect
 }: QuestionRendererProps) {
+  const customInput = renderQuestionInput?.(question);
+  if (customInput) {
+    return customInput;
+  }
+
   if (question.type === "group") {
     const groupValue = isRecord(value) ? (value as GroupAnswer) : {};
 
@@ -39,12 +59,16 @@ export function QuestionRenderer({
             <FieldInput
               field={field}
               value={groupValue[field.name]}
+              contextValues={groupValue}
               onFocus={() => onHelpChange(helpFromField(question, field))}
               onChange={(nextValue) =>
                 onChange({
                   ...groupValue,
                   [field.name]: nextValue
                 })
+              }
+              onPositionSelect={(position) =>
+                onFieldPositionSelect?.({ question, field }, position)
               }
             />
           </LabeledField>
@@ -60,6 +84,8 @@ export function QuestionRenderer({
         fields={question.fields ?? []}
         value={Array.isArray(value) ? (value as CardAnswer[]) : []}
         onChange={onChange}
+        question={question}
+        onFieldPositionSelect={onFieldPositionSelect}
         onHelpChange={(field, cardIndex) =>
           onHelpChange(helpFromField(question, field, `Карточка ${cardIndex + 1}`))
         }
@@ -143,15 +169,21 @@ export function QuestionRenderer({
                   <FieldInput
                     field={field}
                     value={detailsValue[field.name]}
+                    contextValues={detailsValue}
                     onFocus={() => onHelpChange(helpFromField(question, field))}
-                    onChange={(nextValue) =>
+                    onChange={(nextValue) => {
+                      const clearedFields = getClearedFieldValues(field);
                       onChange({
                         ...conditionalValue,
                         details: {
                           ...detailsValue,
+                          ...clearedFields,
                           [field.name]: nextValue
                         }
-                      })
+                      });
+                    }}
+                    onPositionSelect={(position) =>
+                      onFieldPositionSelect?.({ question, field }, position)
                     }
                   />
                 </LabeledField>
@@ -171,6 +203,8 @@ export function QuestionRenderer({
                 details: nextValue
               })
             }
+            question={question}
+            onFieldPositionSelect={onFieldPositionSelect}
             onHelpChange={(field, cardIndex) =>
               onHelpChange(helpFromField(question, field, `Карточка ${cardIndex + 1}`))
             }
@@ -266,12 +300,19 @@ function CardListEditor({
   fields,
   value,
   onChange,
+  question,
+  onFieldPositionSelect,
   onHelpChange
 }: {
   addLabel: string;
   fields: FieldConfig[];
   value: CardAnswer[];
   onChange: (value: CardAnswer[]) => void;
+  question: QuestionConfig;
+  onFieldPositionSelect?: (
+    context: FieldAutocompleteContext,
+    position: PositionSuggestion
+  ) => void;
   onHelpChange: (field: FieldConfig, cardIndex: number) => void;
 }) {
   const cards = value.length > 0 ? value : [];
@@ -306,6 +347,7 @@ function CardListEditor({
                 <FieldInput
                   field={field}
                   value={card[field.name]}
+                  contextValues={card}
                   onFocus={() => onHelpChange(field, index)}
                   onChange={(nextValue) => {
                     const nextCards = cards.map((item, cardIndex) =>
@@ -319,6 +361,9 @@ function CardListEditor({
 
                     onChange(nextCards);
                   }}
+                  onPositionSelect={(position) =>
+                    onFieldPositionSelect?.({ question, field, cardIndex: index }, position)
+                  }
                 />
               </LabeledField>
             ))}
@@ -376,7 +421,7 @@ function LabeledBlock({
   children: React.ReactNode;
 }) {
   return (
-    <label
+    <div
       className={`field-block ${layout ? `field-layout-${layout}` : ""}`}
       onFocusCapture={onHelp}
       onMouseEnter={onHelp}
@@ -387,7 +432,7 @@ function LabeledBlock({
       </span>
       {children}
       {help ? <span className="field-help">{help}</span> : null}
-    </label>
+    </div>
   );
 }
 
@@ -452,9 +497,9 @@ function getNextMultiChoiceValue(
 function isExclusiveOption(option: NonNullable<QuestionConfig["options"]>[number]): boolean {
   const label = option.label.toLowerCase();
   return (
-    label === "не применимо" ||
+    label.startsWith("не применимо") ||
     label.startsWith("не требуется") ||
-    label.startsWith("не управляет")
+    label.startsWith("не управля")
   );
 }
 
@@ -465,6 +510,14 @@ function helpFromQuestion(question: QuestionConfig): HelpContent {
     example: question.example,
     hint: question.helpHint
   };
+}
+
+function getClearedFieldValues(field: FieldConfig): GroupAnswer {
+  if (!field.clearsFields?.length) {
+    return {};
+  }
+
+  return Object.fromEntries(field.clearsFields.map((fieldName) => [fieldName, ""]));
 }
 
 function helpFromField(

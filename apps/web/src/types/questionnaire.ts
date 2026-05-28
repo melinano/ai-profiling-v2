@@ -45,6 +45,12 @@ export type FieldConfig = {
     notEquals?: string | string[];
   };
   options?: ChoiceOption[];
+  autocomplete?: "positions" | "org_units" | "directory";
+  readOnly?: boolean;
+  display?: "org_path";
+  selectedPositionDisplay?: "title" | "title_with_org";
+  lockWhenFieldPresent?: string;
+  clearsFields?: string[];
   placeholder?: string;
   optional?: boolean;
   help?: string;

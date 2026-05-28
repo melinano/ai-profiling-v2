@@ -26,9 +26,10 @@ Implemented in the current repository under `apps/web`:
 - Bun + React + TypeScript + Vite web app;
 - minimal Bun API for draft load/save/submit;
 - static questionnaire schema in `src/data/questionnaire.ts`;
-- final submitted answers Zod schema in `src/schemas/profileAnswers.ts`;
-- generated JSON Schema in `docs/schemas/profile-answers.schema.json`;
 - reusable questionnaire types in `src/types/questionnaire.ts`;
+- documented JSON answer contract in `docs/interview-answer-json.md`;
+- baseline machine-readable JSON Schema in
+  `docs/schemas/interview-answer-payload.schema.json`;
 - guided wizard shell with section navigation and status calculation;
 - Section 1 rendered as a combined page with all general-information questions;
 - other sections rendered one logical block at a time;
@@ -41,6 +42,9 @@ Implemented in the current repository under `apps/web`:
 - repeatable cards for responsibilities, reports, interactions, and funding;
 - exclusive multi-choice behavior for options such as "Не применимо" and
   "Не требуется...";
+- explicit local validation for required questionnaire blocks: when navigation
+  is blocked, the exact question/card is highlighted and receives an inline
+  instruction explaining what the user must do next;
 - simplified Section 7 as two long-text fields;
 - conditional experience fields in Section 8:
   - professional experience description appears only when experience is
@@ -54,6 +58,9 @@ Primary source of truth:
 
 - `docs/profiling-questionnaire.md` — approved questionnaire structure, section
   IDs, question IDs, prompts, fields, options, examples, and UX notes.
+- `docs/web-app-todo.md` — web-app backlog: schemas, PostgreSQL persistence,
+  auth, invitation links, employee/reviewer UI, and profile-agent integration
+  points.
 
 Product clarification used during implementation:
 
@@ -84,7 +91,8 @@ Frontend:
 - Vite;
 - plain CSS;
 - `lucide-react` for icons.
-- Zod for the submitted answer contract.
+- TypeScript types for the current answer contract. Zod/Pydantic schemas should
+  be added as mirrors of `docs/interview-answer-json.md`.
 
 Runtime/API:
 
@@ -142,8 +150,6 @@ Core files to recreate:
 
 - `src/data/questionnaire.ts` — source schema for the MVP UI;
 - `src/types/questionnaire.ts` — schema and answer types;
-- `src/schemas/profileAnswers.ts` — strict final submitted answer schema;
-- `src/scripts/generateAnswerSchema.ts` — JSON Schema generator;
 - `src/lib/questionnaire.ts` — progress, validation, status, summary helpers;
 - `src/components/QuestionRenderer.tsx` — input rendering;
 - `src/components/HelpPanel.tsx` — contextual static help;
@@ -159,8 +165,8 @@ Core files to recreate:
 - Consider storing the questionnaire schema as JSON or JSON-compatible
   TypeScript so backend validation can share the same source of truth.
 - Keep a strict submitted-answer schema separate from a permissive draft schema.
-- Mirror `profileAnswersSchema` in Python with Pydantic before using answers in
-  LLM flows.
+- Mirror the documented answer JSON contract in TypeScript/Zod and Python
+  Pydantic before using answers in LLM flows.
 - Replace in-memory API persistence early with PostgreSQL tables for:
   - profiling sessions;
   - answers;
@@ -180,3 +186,9 @@ Core files to recreate:
 - Preserve field-level help and examples. They were important for usability.
 - Keep Section 1 as a combined page, but keep the other sections as wizard
   blocks unless product review changes that decision.
+- Use the same explicit validation pattern everywhere the user can be blocked:
+  highlight the exact question or card, show an inline error inside that block,
+  scroll/focus there when practical, and make the instruction actionable. For
+  conditional card lists, say that the user must either add and complete a card
+  or switch the answer to "Нет". Avoid only showing a generic bottom status or
+  silently disabling progress.
