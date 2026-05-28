@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "dev:api": "bun run src/server/server.ts",
+    "generate:answer-schema": "bun run src/scripts/generateAnswerSchema.ts",
+    "check:answer-schema": "bun run src/scripts/checkAnswerPayloadSchemas.ts",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "check": "tsc --noEmit"
@@ -13,7 +15,8 @@
   "dependencies": {
     "lucide-react": "^0.468.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/bun": "^1.1.14",

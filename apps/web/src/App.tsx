@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AutocompleteInput } from "./components/AutocompleteInput";
 import { DerivedOrgPathDisplay } from "./components/DerivedOrgPathDisplay";
 import { HelpPanel } from "./components/HelpPanel";
+import { InvitationStartScreen } from "./components/InvitationStartScreen";
 import { ProgressNav } from "./components/ProgressNav";
 import { QuestionRenderer } from "./components/QuestionRenderer";
 import { ReviewScreen } from "./components/ReviewScreen";
@@ -25,9 +26,11 @@ import {
   loadRemoteDraft,
   saveLocalDraft,
   saveRemoteDraft,
+  setStoredProfileId,
   submitRemoteDraft
 } from "./lib/draftStorage";
 import type { PositionContext, PositionSuggestion } from "./types/directory";
+import type { InvitationStartResult } from "./types/invitation";
 import type {
   AnswersState,
   AnswerValue,
@@ -53,7 +56,9 @@ function createInitialAnswers(): AnswersState {
 }
 
 export function App() {
-  const [profileId] = useState(() => getOrCreateProfileId());
+  const [invitationToken, setInvitationToken] = useState(() => getInvitationToken());
+  const [needsInvitationStart, setNeedsInvitationStart] = useState(() => Boolean(getInvitationToken()));
+  const [profileId, setProfileId] = useState(() => getOrCreateProfileId());
   const [answers, setAnswers] = useState<AnswersState>(() => {
     const localDraft = loadLocalDraft(getOrCreateProfileId());
     return {
@@ -88,6 +93,10 @@ export function App() {
   const currentHelp = activeHelp ?? helpFromQuestion(currentQuestion);
 
   useEffect(() => {
+    if (needsInvitationStart) {
+      return;
+    }
+
     let active = true;
 
     loadRemoteDraft(profileId)
@@ -109,7 +118,7 @@ export function App() {
     return () => {
       active = false;
     };
-  }, [profileId]);
+  }, [needsInvitationStart, profileId]);
 
   useEffect(() => {
     const payload = createDraftPayload(profileId, answers, currentQuestionId);
@@ -162,6 +171,23 @@ export function App() {
   function clearValidation() {
     setValidationMessage(null);
     setValidationIssue(null);
+  }
+
+  function handleInvitationStarted(result: InvitationStartResult) {
+    setStoredProfileId(result.profileId);
+    saveLocalDraft(result.draft);
+    setProfileId(result.profileId);
+    setAnswers({
+      ...createInitialAnswers(),
+      ...(result.draft.answers ?? {})
+    });
+    setCurrentQuestionId(normalizeQuestionId(result.draft.currentQuestionId));
+    setReviewMode(false);
+    setSubmitState("idle");
+    setSaveState("saved");
+    setNeedsInvitationStart(false);
+    setInvitationToken(null);
+    window.history.replaceState(null, "", window.location.pathname);
   }
 
   const loadPositionOptions = useCallback((query: string) => searchPositions(query), []);
@@ -360,6 +386,10 @@ export function App() {
           message: getValidationMessage(invalidQuestion, answers[invalidQuestion.id])
         }
       : null;
+  }
+
+  if (invitationToken && needsInvitationStart) {
+    return <InvitationStartScreen token={invitationToken} onStarted={handleInvitationStarted} />;
   }
 
   if (reviewMode) {
@@ -854,6 +884,10 @@ function normalizeQuestionId(questionId: string | undefined): string {
   return questionnaire.questions.some((question) => question.id === questionId)
     ? questionId
     : firstQuestionId;
+}
+
+function getInvitationToken(): string | null {
+  return new URLSearchParams(window.location.search).get("invite");
 }
 
 function buildContextPatch(context: PositionContext): AnswersState {

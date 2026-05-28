@@ -950,6 +950,90 @@ textarea:focus {
   color: #63716d;
 }
 
+.invitation-screen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.invitation-panel {
+  width: min(680px, 100%);
+  border: 1px solid #d6ddda;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 28px;
+  box-shadow: 0 16px 34px rgba(31, 46, 52, 0.08);
+}
+
+.invitation-heading {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.invitation-heading svg {
+  color: #2f6f6d;
+}
+
+.invitation-heading h1 {
+  margin: 4px 0 0;
+  color: #1e2930;
+  font-size: 28px;
+  line-height: 1.2;
+}
+
+.invitation-position {
+  display: grid;
+  gap: 6px;
+  border: 1px solid #c8d7d2;
+  border-radius: 8px;
+  background: #f7faf9;
+  padding: 14px;
+  margin-bottom: 18px;
+}
+
+.invitation-position span {
+  color: #60706c;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.invitation-position strong {
+  color: #163934;
+  font-size: 17px;
+  line-height: 1.35;
+}
+
+.invitation-position small,
+.muted-text {
+  color: #60706c;
+  line-height: 1.4;
+}
+
+.invitation-form {
+  display: grid;
+  gap: 16px;
+}
+
+.invitation-form label {
+  display: grid;
+  gap: 8px;
+  color: #2d3d42;
+  font-weight: 800;
+}
+
+.invitation-form .primary-button {
+  width: fit-content;
+}
+
+.invitation-error {
+  margin-bottom: 16px;
+}
+
 @media (max-width: 1180px) {
   .app-shell,
   .app-shell.review-layout {

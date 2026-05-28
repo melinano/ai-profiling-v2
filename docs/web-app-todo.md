@@ -9,15 +9,22 @@ web API, UX, сохранение анкеты, авторизация, роли
 
 ## 1. Контракт ответов анкеты на стороне web
 
-- Добавить TypeScript/Zod-схемы для JSON ответов анкеты.
-  - `DraftAnswerPayload` - permissive-схема для частично заполненного черновика.
-  - `SubmittedAnswerPayload` - strict-схема для финальной отправки.
-  - Схемы должны соответствовать `docs/interview-answer-json.md`.
-- Настроить генерацию JSON Schema из Zod, чтобы
-  `docs/schemas/interview-answer-payload.schema.json` не поддерживался вручную.
-- Разделить проверки:
-  - структурная валидность JSON;
-  - бизнес-полнота анкеты по `questionnaire.ts`.
+- Добавлено:
+  - TypeScript/Zod-схемы в `apps/web/src/schemas/answerPayload.ts`;
+  - `DraftAnswerPayload` - permissive-схема для частично заполненного
+    черновика;
+  - `SubmittedAnswerPayload` - strict-схема для финальной отправки;
+  - генерация JSON Schema командой `bun run generate:answer-schema` из
+    `apps/web`;
+  - структурная проверка draft/submit в web API;
+  - отдельная проверка бизнес-полноты анкеты по `questionnaire.ts` при submit.
+  - базовая проверка совместимости контрактов командой
+    `bun run check:answer-schema`.
+- Оставшиеся задачи:
+  - расширить схему структурированными ids выбранной должности/оргструктуры,
+    когда они появятся в payload;
+  - синхронизировать будущие Pydantic-модели profile-agent с этой Zod/JSON
+    Schema.
 - Добавить frontend/backend тесты на:
   - валидный draft payload;
   - невалидный draft payload;
@@ -28,8 +35,19 @@ web API, UX, сохранение анкеты, авторизация, роли
 
 ## 2. Сохранение анкеты в PostgreSQL
 
-- Заменить временное хранение черновиков в памяти Bun API на PostgreSQL.
-- Сохранять ответы в `interview_runs.answers_json`.
+- Добавлен переходный DB-путь для draft save/load/submit:
+  - если заданы `DATABASE_URL` и `WEB_MVP_ASSIGNMENT_ID`, API сохраняет тот же
+    answer payload в `interview_runs.answers_json`;
+  - если `WEB_MVP_ASSIGNMENT_ID` не задан, API временно использует in-memory
+    fallback, пока не реализован вход по ссылке и создание `Assignment`;
+  - после `submitted` DB-запись не редактируется через draft save.
+- Оставшиеся задачи:
+  - заменить fallback на обязательный `InterviewRun` после invitation/auth-flow;
+  - добавить миграцию/индекс для быстрого поиска черновика по `profileId` или
+    перейти на открытие черновика по `interview_run_id`;
+  - убрать локальный `profileId` как главный идентификатор после появления
+    `Assignment -> InterviewRun` на входе пользователя.
+- Ответы сохраняются в `interview_runs.answers_json`.
 - Поддержать статусы:
   - `not_started`;
   - `in_progress`;
@@ -71,25 +89,27 @@ User -> Assignment -> Position -> OrgUnit -> InterviewRun
 
 ## 4. Вход по ссылке и старт анкеты
 
-- Реализовать `invitation_links` как основной MVP-механизм входа сотрудника.
-- Создать web-экран входа по ссылке до анкеты.
-  - Пользователь открывает ссылку.
-  - Видит должность и оргструктуру, для которых создано приглашение.
-  - Вводит корпоративную почту.
-  - Вводит ФИО.
-  - Подтверждает начало заполнения анкеты.
-- После идентификации web API должен:
-  - найти или создать `User`;
-  - найти или создать `Assignment`;
-  - создать или открыть `InterviewRun`;
-  - перенаправить пользователя в анкету.
-- Добавить состояния ссылки:
-  - active;
-  - expired;
-  - revoked;
-  - max uses reached.
-- Хранить только `token_hash`, не raw token.
-- Добавить экран ошибки/недоступности ссылки.
+- Добавлено:
+  - `GET /api/invitations/:token` для предпросмотра активной ссылки;
+  - `POST /api/invitations/:token/start` для старта анкеты;
+  - web-экран входа по ссылке `?invite=...` до анкеты;
+  - пользователь видит должность и оргструктуру, для которых создано
+    приглашение;
+  - пользователь вводит корпоративную почту и ФИО;
+  - web API находит или создаёт `User`;
+  - web API находит или создаёт активный `Assignment`;
+  - web API создаёт или открывает `InterviewRun`;
+  - после старта анкета использует `profileId = interview_runs.id`, не меняя
+    форму answer payload;
+  - ссылки ищутся по `token_hash`; raw token не хранится;
+  - обработаны недоступные состояния: не найдена, не active, expired,
+    max uses reached.
+- Оставшиеся задачи:
+  - добавить интерфейс модератора/администратора для создания ссылок;
+  - добавить copy-link UI и отзыв ссылки;
+  - решить политику repeated uses: когда увеличивать `used_count` для
+    повторного открытия уже созданного черновика тем же пользователем;
+  - добавить полноценные backend-тесты для invitation flow.
 
 ## 5. Интерфейс модератора/администратора
 

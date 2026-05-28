@@ -25,17 +25,22 @@ Implemented in the current repository under `apps/web`:
 
 - Bun + React + TypeScript + Vite web app;
 - minimal Bun API for draft load/save/submit;
+- invitation-link start API and pre-questionnaire entry screen;
 - static questionnaire schema in `src/data/questionnaire.ts`;
 - reusable questionnaire types in `src/types/questionnaire.ts`;
 - documented JSON answer contract in `docs/interview-answer-json.md`;
-- baseline machine-readable JSON Schema in
+- Zod answer payload schemas in `apps/web/src/schemas/answerPayload.ts`;
+- generated machine-readable JSON Schema in
   `docs/schemas/interview-answer-payload.schema.json`;
 - guided wizard shell with section navigation and status calculation;
 - Section 1 rendered as a combined page with all general-information questions;
 - other sections rendered one logical block at a time;
 - final review screen with section summaries;
 - browser localStorage draft persistence;
-- in-memory API placeholder for draft persistence;
+- PostgreSQL draft persistence through `interview_runs.answers_json` when the
+  questionnaire is opened from an invitation-created `InterviewRun`;
+- in-memory API fallback for local development before invitation/auth context is
+  available;
 - static right-side help panel;
 - field-level contextual help that changes on focus/hover;
 - conditional fields and conditional card lists;
@@ -91,8 +96,9 @@ Frontend:
 - Vite;
 - plain CSS;
 - `lucide-react` for icons.
-- TypeScript types for the current answer contract. Zod/Pydantic schemas should
-  be added as mirrors of `docs/interview-answer-json.md`.
+- Zod for the current answer payload contract and JSON Schema generation.
+  Pydantic schemas should mirror the generated contract in the Python
+  profile-agent track.
 
 Runtime/API:
 
