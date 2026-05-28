@@ -6,10 +6,17 @@
 Машинно-читаемая базовая схема находится в
 `docs/schemas/interview-answer-payload.schema.json`.
 
-Важно: в текущем коде веб-приложения строгой Zod-схемы пока нет. Реальный
-контракт сейчас задан типами `apps/web/src/types/questionnaire.ts`, схемой
-анкеты `apps/web/src/data/questionnaire.ts` и JSON Schema из этого документа.
-Будущие Zod- и Pydantic-схемы должны зеркалить этот контракт.
+Источник машинно-читаемого контракта на стороне web:
+`apps/web/src/schemas/answerPayload.ts`. JSON Schema генерируется из этой
+Zod-схемы командой:
+
+```bash
+cd apps/web
+bun run generate:answer-schema
+```
+
+Python/Pydantic-схема profile-agent должна зеркалить этот контракт, но сама
+реализация Pydantic относится к отдельному не-web треку.
 
 ## Верхний уровень
 
@@ -40,18 +47,21 @@
 
 - draft payload может быть частичным: часть ключей отсутствует, строки могут
   быть пустыми, условные блоки могут быть не завершены;
-- submitted payload должен пройти проверку обязательных вопросов из
-  `questionnaire.ts`;
+- submitted payload требует `submittedAt`, должен быть структурно валиден по
+  `submittedAnswerPayloadSchema` и должен пройти проверку обязательных вопросов
+  из `questionnaire.ts`;
 - на уровне БД этот объект должен попадать в `interview_runs.answers_json`.
 
 Текущая веб-реализация сохраняет черновик:
 
 - автоматически в `localStorage`;
-- вручную через временный API `PUT /api/profile-drafts/:profileId`;
+- вручную через API `PUT /api/profile-drafts/:profileId`;
 - при отправке через `POST /api/profile-drafts/:profileId/submit`.
 
-Серверный API черновиков сейчас временный и хранит данные в памяти процесса.
-Для production это нужно заменить записью в PostgreSQL в `interview_runs`.
+Если заданы `DATABASE_URL` и `WEB_MVP_ASSIGNMENT_ID`, серверный API сохраняет
+payload в `interview_runs.answers_json`. Если `WEB_MVP_ASSIGNMENT_ID` не задан,
+API использует временный in-memory fallback до реализации входа по ссылке и
+создания `Assignment`.
 
 ## Типы значений
 

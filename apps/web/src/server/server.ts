@@ -1,6 +1,13 @@
 import type { DraftPayload } from "../types/questionnaire";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import {
+  draftAnswerPayloadSchema,
+  getIncompleteRequiredQuestionIds,
+  submittedAnswerPayloadSchema,
+  submitAnswerRequestSchema
+} from "../schemas/answerPayload";
 
 type StoredDraft = DraftPayload & {
   status: "draft" | "submitted";
@@ -8,9 +15,19 @@ type StoredDraft = DraftPayload & {
   submittedAt?: string;
 };
 
+type InvitationRecord = {
+  id: string;
+  status: string;
+  maxUses: number | null;
+  usedCount: number;
+  expiresAt: string | null;
+  position: ReturnType<typeof mapPositionRow>;
+};
+
 const drafts = new Map<string, StoredDraft>();
 const port = Number(Bun.env.PORT ?? 3001);
 const databaseUrl = getEnv("DATABASE_URL");
+const webMvpAssignmentId = normalizeUuidParam(getEnv("WEB_MVP_ASSIGNMENT_ID") ?? null);
 let sqlClient: Bun.SQL | null | undefined;
 
 const server = Bun.serve({
@@ -335,30 +352,96 @@ const server = Bun.serve({
       });
     }
 
+    const invitationMatch = url.pathname.match(/^\/api\/invitations\/([^/]+)$/);
+    if (invitationMatch && request.method === "GET") {
+      return withDatabase(async (sql) => {
+        const invitation = await findInvitationByRawToken(sql, invitationMatch[1]);
+        if (!invitation) {
+          return jsonResponse({ error: "Invitation link not found" }, 404);
+        }
+
+        const availabilityIssue = getInvitationAvailabilityIssue(invitation);
+        if (availabilityIssue) {
+          return jsonResponse({ error: availabilityIssue }, 410);
+        }
+
+        return jsonResponse({
+          id: invitation.id,
+          status: invitation.status,
+          expiresAt: invitation.expiresAt,
+          position: invitation.position
+        });
+      });
+    }
+
+    const invitationStartMatch = url.pathname.match(/^\/api\/invitations\/([^/]+)\/start$/);
+    if (invitationStartMatch && request.method === "POST") {
+      return withDatabase(async (sql) => {
+        const invitation = await findInvitationByRawToken(sql, invitationStartMatch[1]);
+        if (!invitation) {
+          return jsonResponse({ error: "Invitation link not found" }, 404);
+        }
+
+        const availabilityIssue = getInvitationAvailabilityIssue(invitation);
+        if (availabilityIssue) {
+          return jsonResponse({ error: availabilityIssue }, 410);
+        }
+
+        const body = await parseJson<{ email?: string; fullName?: string }>(request);
+        const email = normalizeEmail(body?.email);
+        const fullName = normalizePersonName(body?.fullName);
+        if (!email || !fullName) {
+          return jsonResponse({ error: "Email and full name are required" }, 400);
+        }
+
+        const result = await startInterviewFromInvitation(sql, invitation, email, fullName);
+        return jsonResponse(result);
+      });
+    }
+
     const draftMatch = url.pathname.match(/^\/api\/profile-drafts\/([^/]+)$/);
     if (draftMatch) {
       const profileId = draftMatch[1];
 
       if (request.method === "GET") {
-        const draft = drafts.get(profileId);
+        const databaseDraft = await getDatabaseDraft(profileId);
+        if (databaseDraft.response) {
+          return databaseDraft.response;
+        }
+
+        const draft = databaseDraft.draft ?? drafts.get(profileId);
         return draft ? jsonResponse(draft) : jsonResponse({ error: "Draft not found" }, 404);
       }
 
       if (request.method === "PUT") {
-        const body = await parseJson<DraftPayload>(request);
-        if (!body?.profileId || body.profileId !== profileId) {
-          return jsonResponse({ error: "Invalid draft payload" }, 400);
+        const requestBody = await parseJson<unknown>(request);
+        const parsedBody = draftAnswerPayloadSchema.safeParse(requestBody);
+        if (!parsedBody.success || parsedBody.data.profileId !== profileId) {
+          return jsonResponse(
+            {
+              error: "Invalid draft payload",
+              issues: parsedBody.success ? ["Profile id does not match URL"] : formatZodIssues(parsedBody.error)
+            },
+            400
+          );
         }
 
-        const existing = drafts.get(profileId);
+        const body = parsedBody.data as DraftPayload;
         const now = new Date().toISOString();
         const stored: StoredDraft = {
           ...body,
-          status: existing?.status ?? "draft",
-          createdAt: existing?.createdAt ?? now,
+          status: "draft",
+          createdAt: now,
           updatedAt: now
         };
 
+        const databaseDraft = await saveDatabaseDraft(stored);
+        if (databaseDraft.response) {
+          return databaseDraft.response;
+        }
+
+        const existing = drafts.get(profileId);
+        stored.createdAt = existing?.createdAt ?? now;
         drafts.set(profileId, stored);
         return jsonResponse(stored);
       }
@@ -367,23 +450,62 @@ const server = Bun.serve({
     const submitMatch = url.pathname.match(/^\/api\/profile-drafts\/([^/]+)\/submit$/);
     if (submitMatch && request.method === "POST") {
       const profileId = submitMatch[1];
-      const body = await parseJson<Pick<DraftPayload, "answers" | "currentQuestionId">>(request);
-      if (!body?.answers || !body.currentQuestionId) {
-        return jsonResponse({ error: "Invalid submit payload" }, 400);
+      const requestBody = await parseJson<unknown>(request);
+      const parsedBody = submitAnswerRequestSchema.safeParse(requestBody);
+      if (!parsedBody.success) {
+        return jsonResponse(
+          {
+            error: "Invalid submit payload",
+            issues: formatZodIssues(parsedBody.error)
+          },
+          400
+        );
       }
 
       const now = new Date().toISOString();
-      const existing = drafts.get(profileId);
-      const stored: StoredDraft = {
+      const submittedPayload = submittedAnswerPayloadSchema.safeParse({
         profileId,
-        answers: body.answers,
-        currentQuestionId: body.currentQuestionId,
-        status: "submitted",
-        createdAt: existing?.createdAt ?? now,
+        answers: parsedBody.data.answers,
+        currentQuestionId: parsedBody.data.currentQuestionId,
         updatedAt: now,
         submittedAt: now
+      });
+
+      if (!submittedPayload.success) {
+        return jsonResponse(
+          {
+            error: "Invalid submit payload",
+            issues: formatZodIssues(submittedPayload.error)
+          },
+          400
+        );
+      }
+
+      const incompleteQuestionIds = getIncompleteRequiredQuestionIds(submittedPayload.data.answers);
+      if (incompleteQuestionIds.length > 0) {
+        return jsonResponse(
+          {
+            error: "Submitted payload is incomplete",
+            incompleteQuestionIds
+          },
+          422
+        );
+      }
+
+      const stored: StoredDraft = {
+        ...submittedPayload.data,
+        status: "submitted",
+        createdAt: now,
+        updatedAt: now
       };
 
+      const databaseDraft = await submitDatabaseDraft(stored);
+      if (databaseDraft.response) {
+        return databaseDraft.response;
+      }
+
+      const existing = drafts.get(profileId);
+      stored.createdAt = existing?.createdAt ?? now;
       drafts.set(profileId, stored);
       return jsonResponse(stored);
     }
@@ -464,6 +586,378 @@ async function withDatabase(callback: (sql: Bun.SQL) => Promise<Response>) {
   } catch (error) {
     console.error("Database request failed", error);
     return jsonResponse({ error: "Database request failed" }, 503);
+  }
+}
+
+async function findInvitationByRawToken(
+  sql: Bun.SQL,
+  rawToken: string
+): Promise<InvitationRecord | null> {
+  const tokenHash = hashToken(rawToken);
+  const rows = await sql`
+    SELECT
+      il.id::text AS id,
+      il.status,
+      il.max_uses AS "maxUses",
+      il.used_count AS "usedCount",
+      il.expires_at AS "expiresAt",
+      p.id::text AS "positionId",
+      p.title,
+      p.is_supervisor AS "isSupervisor",
+      p.planned_fte::float8 AS "plannedFte",
+      p.occupied_fte::float8 AS "occupiedFte",
+      ou.id::text AS "orgUnitId",
+      ou.name AS "orgUnitName",
+      ou.full_path AS "orgUnitFullPath",
+      ou.level AS "orgUnitLevel"
+    FROM invitation_links il
+    JOIN positions p ON p.id = il.position_id
+    JOIN org_units ou ON ou.id = p.org_unit_id
+    WHERE il.token_hash = ${tokenHash}
+    LIMIT 1
+  `;
+
+  if (!rows[0]) {
+    return null;
+  }
+
+  const row = rows[0];
+  return {
+    id: String(row.id),
+    status: String(row.status),
+    maxUses: row.maxUses === null || row.maxUses === undefined ? null : Number(row.maxUses),
+    usedCount: Number(row.usedCount ?? 0),
+    expiresAt: toIsoString(row.expiresAt) ?? null,
+    position: mapPositionRow({
+      id: row.positionId,
+      title: row.title,
+      isSupervisor: row.isSupervisor,
+      plannedFte: row.plannedFte,
+      occupiedFte: row.occupiedFte,
+      orgUnitId: row.orgUnitId,
+      orgUnitName: row.orgUnitName,
+      orgUnitFullPath: row.orgUnitFullPath,
+      orgUnitLevel: row.orgUnitLevel
+    })
+  };
+}
+
+function getInvitationAvailabilityIssue(invitation: InvitationRecord): string | null {
+  if (invitation.status !== "active") {
+    return "Invitation link is not active";
+  }
+
+  if (invitation.expiresAt && Date.parse(invitation.expiresAt) < Date.now()) {
+    return "Invitation link has expired";
+  }
+
+  if (invitation.maxUses !== null && invitation.usedCount >= invitation.maxUses) {
+    return "Invitation link has reached the maximum number of uses";
+  }
+
+  return null;
+}
+
+async function startInterviewFromInvitation(
+  sql: Bun.SQL,
+  invitation: InvitationRecord,
+  email: string,
+  fullName: string
+) {
+  const userRows = await sql`
+    INSERT INTO users (email, full_name, role, is_active, updated_at)
+    VALUES (${email}, ${fullName}, 'employee', true, now())
+    ON CONFLICT (email)
+    DO UPDATE SET
+      full_name = EXCLUDED.full_name,
+      is_active = true,
+      updated_at = now()
+    RETURNING id::text AS id, email, full_name AS "fullName", role
+  `;
+  const user = userRows[0];
+
+  const existingAssignmentRows = await sql`
+    SELECT id::text AS id
+    FROM assignments
+    WHERE user_id = ${user.id}::uuid
+      AND position_id = ${invitation.position.id}::uuid
+      AND is_active
+    LIMIT 1
+  `;
+
+  const assignmentId =
+    existingAssignmentRows[0]?.id ??
+    (
+      await sql`
+        INSERT INTO assignments (user_id, position_id, rate, is_active, updated_at)
+        VALUES (${user.id}::uuid, ${invitation.position.id}::uuid, NULL, true, now())
+        RETURNING id::text AS id
+      `
+    )[0].id;
+
+  const existingRunRows = await sql`
+    SELECT
+      id::text AS id,
+      status,
+      answers_json AS "answersJson",
+      started_at AS "startedAt",
+      last_saved_at AS "lastSavedAt",
+      submitted_at AS "submittedAt",
+      created_at AS "createdAt"
+    FROM interview_runs
+    WHERE assignment_id = ${assignmentId}::uuid
+    ORDER BY
+      CASE WHEN status = 'in_progress' THEN 0 WHEN status = 'not_started' THEN 1 ELSE 2 END,
+      created_at DESC
+    LIMIT 1
+  `;
+
+  const existingRun = existingRunRows[0];
+  const now = new Date().toISOString();
+  const draft =
+    existingRun && existingRun.status !== "submitted"
+      ? mapInterviewRunDraft(existingRun)
+      : createInitialInterviewDraft(randomUUID(), now);
+
+  if (!existingRun || existingRun.status === "submitted") {
+    await sql`
+      INSERT INTO interview_runs (
+        id,
+        assignment_id,
+        status,
+        answers_json,
+        started_at,
+        last_saved_at,
+        created_at,
+        updated_at
+      )
+      VALUES (
+        ${draft.profileId}::uuid,
+        ${assignmentId}::uuid,
+        'in_progress',
+        ${JSON.stringify(toAnswerPayloadJson(draft))}::jsonb,
+        ${now}::timestamptz,
+        ${now}::timestamptz,
+        ${now}::timestamptz,
+        ${now}::timestamptz
+      )
+    `;
+
+    await sql`
+      UPDATE invitation_links
+      SET used_count = used_count + 1
+      WHERE id = ${invitation.id}::uuid
+    `;
+  }
+
+  return {
+    user,
+    assignmentId,
+    profileId: draft.profileId,
+    draft,
+    position: invitation.position
+  };
+}
+
+async function getDatabaseDraft(profileId: string): Promise<{
+  draft?: StoredDraft;
+  response?: Response;
+}> {
+  const sql = getSqlClient();
+  if (!sql) {
+    return {};
+  }
+
+  try {
+    const profileIdFilter = normalizeUuidParam(profileId);
+    const rows = await sql`
+      SELECT
+        status,
+        answers_json AS "answersJson",
+        started_at AS "startedAt",
+        last_saved_at AS "lastSavedAt",
+        submitted_at AS "submittedAt",
+        created_at AS "createdAt"
+      FROM interview_runs
+      WHERE
+        ${profileIdFilter}::uuid IS NOT NULL
+        AND id = ${profileIdFilter}::uuid
+        OR (
+          ${webMvpAssignmentId}::uuid IS NOT NULL
+          AND assignment_id = ${webMvpAssignmentId}::uuid
+          AND answers_json->>'profileId' = ${profileId}
+        )
+      ORDER BY created_at DESC
+      LIMIT 1
+    `;
+
+    return {
+      draft: rows[0] ? mapInterviewRunDraft(rows[0]) : undefined
+    };
+  } catch (error) {
+    console.error("Database draft load failed", error);
+    return {
+      response: jsonResponse({ error: "Database draft load failed" }, 503)
+    };
+  }
+}
+
+async function saveDatabaseDraft(stored: StoredDraft): Promise<{ response?: Response }> {
+  const sql = getSqlClient();
+  if (!sql) {
+    return {};
+  }
+
+  try {
+    const profileIdFilter = normalizeUuidParam(stored.profileId);
+    const existingRows = await sql`
+      SELECT id::text AS id, status, created_at AS "createdAt"
+      FROM interview_runs
+      WHERE
+        ${profileIdFilter}::uuid IS NOT NULL
+        AND id = ${profileIdFilter}::uuid
+        OR (
+          ${webMvpAssignmentId}::uuid IS NOT NULL
+          AND assignment_id = ${webMvpAssignmentId}::uuid
+          AND answers_json->>'profileId' = ${stored.profileId}
+        )
+      ORDER BY created_at DESC
+      LIMIT 1
+    `;
+
+    const existing = existingRows[0];
+    if (existing?.status === "submitted") {
+      return {
+        response: jsonResponse({ error: "Submitted interview cannot be edited" }, 409)
+      };
+    }
+
+    const payload = toAnswerPayloadJson(stored);
+    const now = stored.updatedAt;
+
+    if (existing) {
+      stored.createdAt = toIsoString(existing.createdAt) ?? stored.createdAt;
+      await sql`
+        UPDATE interview_runs
+        SET
+          status = 'in_progress',
+          answers_json = ${JSON.stringify(payload)}::jsonb,
+          started_at = COALESCE(started_at, ${now}::timestamptz),
+          last_saved_at = ${now}::timestamptz,
+          updated_at = ${now}::timestamptz
+        WHERE id = ${existing.id}::uuid
+      `;
+    } else if (webMvpAssignmentId) {
+      await sql`
+        INSERT INTO interview_runs (
+          assignment_id,
+          status,
+          answers_json,
+          started_at,
+          last_saved_at,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          ${webMvpAssignmentId}::uuid,
+          'in_progress',
+          ${JSON.stringify(payload)}::jsonb,
+          ${now}::timestamptz,
+          ${now}::timestamptz,
+          ${now}::timestamptz,
+          ${now}::timestamptz
+        )
+      `;
+    } else {
+      return {};
+    }
+
+    return {
+      response: jsonResponse(stored)
+    };
+  } catch (error) {
+    console.error("Database draft save failed", error);
+    return {
+      response: jsonResponse({ error: "Database draft save failed" }, 503)
+    };
+  }
+}
+
+async function submitDatabaseDraft(stored: StoredDraft): Promise<{ response?: Response }> {
+  const sql = getSqlClient();
+  if (!sql) {
+    return {};
+  }
+
+  try {
+    const profileIdFilter = normalizeUuidParam(stored.profileId);
+    const existingRows = await sql`
+      SELECT id::text AS id, created_at AS "createdAt"
+      FROM interview_runs
+      WHERE
+        ${profileIdFilter}::uuid IS NOT NULL
+        AND id = ${profileIdFilter}::uuid
+        OR (
+          ${webMvpAssignmentId}::uuid IS NOT NULL
+          AND assignment_id = ${webMvpAssignmentId}::uuid
+          AND answers_json->>'profileId' = ${stored.profileId}
+        )
+      ORDER BY created_at DESC
+      LIMIT 1
+    `;
+
+    const existing = existingRows[0];
+    const payload = toAnswerPayloadJson(stored);
+    const now = stored.updatedAt;
+    stored.createdAt = toIsoString(existing?.createdAt) ?? stored.createdAt;
+
+    if (existing) {
+      await sql`
+        UPDATE interview_runs
+        SET
+          status = 'submitted',
+          answers_json = ${JSON.stringify(payload)}::jsonb,
+          started_at = COALESCE(started_at, ${now}::timestamptz),
+          last_saved_at = ${now}::timestamptz,
+          submitted_at = ${stored.submittedAt}::timestamptz,
+          updated_at = ${now}::timestamptz
+        WHERE id = ${existing.id}::uuid
+      `;
+    } else if (webMvpAssignmentId) {
+      await sql`
+        INSERT INTO interview_runs (
+          assignment_id,
+          status,
+          answers_json,
+          started_at,
+          last_saved_at,
+          submitted_at,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          ${webMvpAssignmentId}::uuid,
+          'submitted',
+          ${JSON.stringify(payload)}::jsonb,
+          ${now}::timestamptz,
+          ${now}::timestamptz,
+          ${stored.submittedAt}::timestamptz,
+          ${now}::timestamptz,
+          ${now}::timestamptz
+        )
+      `;
+    } else {
+      return {};
+    }
+
+    return {
+      response: jsonResponse(stored)
+    };
+  } catch (error) {
+    console.error("Database draft submit failed", error);
+    return {
+      response: jsonResponse({ error: "Database draft submit failed" }, 503)
+    };
   }
 }
 
@@ -568,12 +1062,92 @@ function mapReportRow(row: Record<string, unknown>) {
   };
 }
 
+function mapInterviewRunDraft(row: Record<string, unknown>): StoredDraft {
+  const payload = parseAnswersJson(row.answersJson);
+  const updatedAt =
+    toIsoString(row.lastSavedAt) ??
+    toIsoString(row.submittedAt) ??
+    toIsoString(row.createdAt) ??
+    new Date().toISOString();
+  const submittedAt = payload.submittedAt ?? toIsoString(row.submittedAt);
+
+  return {
+    ...payload,
+    updatedAt,
+    submittedAt: submittedAt ?? undefined,
+    status: row.status === "submitted" ? "submitted" : "draft",
+    createdAt: toIsoString(row.createdAt) ?? updatedAt
+  };
+}
+
+function parseAnswersJson(value: unknown): DraftPayload {
+  if (typeof value === "string") {
+    return JSON.parse(value) as DraftPayload;
+  }
+
+  return value as DraftPayload;
+}
+
+function toAnswerPayloadJson(stored: StoredDraft): DraftPayload {
+  return {
+    profileId: stored.profileId,
+    answers: stored.answers,
+    currentQuestionId: stored.currentQuestionId,
+    updatedAt: stored.updatedAt,
+    submittedAt: stored.submittedAt
+  };
+}
+
+function createInitialInterviewDraft(profileId: string, now: string): StoredDraft {
+  return {
+    profileId,
+    answers: {
+      section_1_completion_date: now.slice(0, 10)
+    },
+    currentQuestionId: "section_1_position_title",
+    updatedAt: now,
+    status: "draft",
+    createdAt: now
+  };
+}
+
+function hashToken(rawToken: string): string {
+  return createHash("sha256").update(rawToken, "utf-8").digest("hex");
+}
+
+function normalizeEmail(value: string | undefined): string {
+  return value?.trim().toLocaleLowerCase("ru-RU") ?? "";
+}
+
+function normalizePersonName(value: string | undefined): string {
+  return value?.trim().replace(/\s+/g, " ") ?? "";
+}
+
+function toIsoString(value: unknown): string | undefined {
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  if (typeof value === "string") {
+    return value;
+  }
+
+  return undefined;
+}
+
 async function parseJson<T>(request: Request): Promise<T | null> {
   try {
     return (await request.json()) as T;
   } catch {
     return null;
   }
+}
+
+function formatZodIssues(error: { issues: Array<{ path: Array<PropertyKey>; message: string }> }): string[] {
+  return error.issues.map((issue) => {
+    const path = issue.path.length > 0 ? issue.path.join(".") : "payload";
+    return `${path}: ${issue.message}`;
+  });
 }
 
 function jsonResponse(payload: unknown, status = 200): Response {

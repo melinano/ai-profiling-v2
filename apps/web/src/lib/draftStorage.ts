@@ -15,6 +15,10 @@ export function getOrCreateProfileId(): string {
   return created;
 }
 
+export function setStoredProfileId(profileId: string): void {
+  window.localStorage.setItem(profileIdKey, profileId);
+}
+
 export function loadLocalDraft(profileId: string): Partial<DraftPayload> | null {
   const raw = window.localStorage.getItem(`${draftKeyPrefix}${profileId}`);
 

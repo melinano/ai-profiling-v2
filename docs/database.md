@@ -198,6 +198,12 @@ email и ФИО.
 InvitationLink -> User find/create -> Assignment find/create -> InterviewRun
 ```
 
+Web API принимает raw token только из URL, хеширует его SHA-256 и ищет
+`invitation_links.token_hash`. При успешном старте анкеты создаётся или
+открывается `InterviewRun`, а `interview_runs.id` используется как
+`profileId` в текущем answer payload. Это сохраняет существующий JSON-контракт
+и одновременно привязывает анкету к доменной цепочке `Assignment`.
+
 ### `interview_runs`
 
 Конкретное заполнение анкеты по назначению.
@@ -215,6 +221,13 @@ InvitationLink -> User find/create -> Assignment find/create -> InterviewRun
 
 - После `submitted` сотрудник не должен редактировать интервью в MVP.
 - Ответы хранятся как JSON, потому что анкета data-driven.
+- Текущий web MVP сохраняет в `answers_json` полный answer payload из
+  `apps/web/src/schemas/answerPayload.ts`: `profileId`, `currentQuestionId`,
+  `updatedAt`, необязательный `submittedAt` и `answers`.
+- Пока invitation/auth-flow не реализован, web API может сохранять черновики в
+  `interview_runs` только если задан `WEB_MVP_ASSIGNMENT_ID`. Это переходный
+  режим; после реализации входа по ссылке `Assignment` должен создаваться или
+  находиться до открытия анкеты.
 
 ### `artifacts`
 
