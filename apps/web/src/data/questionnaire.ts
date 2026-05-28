@@ -85,12 +85,12 @@ export const questionnaire: QuestionnaireConfig = {
       id: "section_1_org_path",
       sectionId: "section_1",
       title: "Принадлежность к организационной структуре",
-      prompt: "Проверьте или укажите всю цепочку подразделений, к которой относится ваша должность.",
-      purpose: "Определить полную цепочку подразделений.",
+      prompt: "Проверьте цепочку подразделений, которая подставилась после выбора должности.",
+      purpose: "Зафиксировать полную цепочку подразделений из справочника должностей.",
       type: "long_text",
       required: true,
-      help: "Запишите цепочку подразделений сверху вниз. В будущем здесь лучше использовать дерево оргструктуры или хлебные крошки.",
-      placeholder: "Университет / институт / управление / отдел",
+      help: "Организационная структура определяется выбранной должностью и не редактируется отдельно, чтобы должность и подразделение не расходились.",
+      placeholder: "Заполнится после выбора должности",
       example: "Университет / Институт дополнительного образования / Отдел программ развития"
     },
     {
@@ -121,12 +121,16 @@ export const questionnaire: QuestionnaireConfig = {
       conditionalDetails: {
         different: {
           type: "group",
-          help: "Укажите должность и подразделение функционального руководителя отдельно, чтобы связь можно было проверить по оргструктуре.",
+          help: "Выберите должность функционального руководителя. Подразделение подставится из справочника автоматически.",
           fields: [
             {
               name: "functional_manager_position",
               label: "Должность функционального руководителя",
               type: "short_text",
+              autocomplete: "positions",
+              selectedPositionDisplay: "title",
+              lockWhenFieldPresent: "functional_manager_department",
+              clearsFields: ["functional_manager_department"],
               help: "Укажите должность руководителя, который задаёт профессиональные или методические задачи.",
               example: "Директор проектного офиса"
             },
@@ -134,7 +138,10 @@ export const questionnaire: QuestionnaireConfig = {
               name: "functional_manager_department",
               label: "Подразделение функционального руководителя",
               type: "short_text",
-              help: "Укажите подразделение, к которому относится функциональный руководитель.",
+              readOnly: true,
+              display: "org_path",
+              placeholder: "Заполнится после выбора должности руководителя",
+              help: "Подразделение определяется выбранной должностью функционального руководителя и не редактируется отдельно.",
               example: "Управление стратегических проектов"
             }
           ]
@@ -145,11 +152,11 @@ export const questionnaire: QuestionnaireConfig = {
       id: "section_1_direct_reports",
       sectionId: "section_1",
       title: "Прямые административные подчинённые",
-      prompt: "Есть ли у вас сотрудники в прямом административном подчинении?",
-      purpose: "Определить должности и количество сотрудников в прямом подчинении.",
+      prompt: "Проверьте прямых административных подчинённых, загруженных из оргструктуры.",
+      purpose: "Показать должности и количество сотрудников в прямом подчинении из справочника.",
       type: "conditional",
       required: true,
-      help: "Прямые административные подчинённые находятся в непосредственном подчинении по управленческой линии.",
+      help: "Прямые административные подчинённые загружаются автоматически из справочника по выбранной должности. Должности и подразделения не редактируются, но количество сотрудников можно уточнить вручную.",
       options: yesNo,
       conditionalDetails: {
         yes: {
@@ -161,6 +168,7 @@ export const questionnaire: QuestionnaireConfig = {
               name: "subordinate_position",
               label: "Должность",
               type: "short_text",
+              autocomplete: "positions",
               layout: "wide",
               help: "Укажите название должности в прямом административном подчинении.",
               example: "Ведущий специалист отдела"
@@ -209,6 +217,7 @@ export const questionnaire: QuestionnaireConfig = {
               name: "position_or_department",
               label: "Должность / подразделение",
               type: "short_text",
+              autocomplete: "positions",
               layout: "wide",
               help: "Укажите должность или подразделение, которым должность руководит функционально.",
               example: "Координаторы проектов в институтах"
@@ -357,6 +366,18 @@ export const questionnaire: QuestionnaireConfig = {
           options: options(["ФОТ", "Операционный", "Инвестиционный", "Проектный", "Иное", "Не применимо"])
         },
         {
+          name: "budget_type_other_comment",
+          label: "Поясните тип бюджета",
+          type: "short_text",
+          visibleWhen: {
+            field: "budget_type",
+            equals: "Иное"
+          },
+          help: "Кратко опишите, какой именно бюджет вы имеете в виду под вариантом «Иное».",
+          placeholder: "Например: целевая субсидия, смешанный проектный бюджет",
+          example: "Целевая субсидия на оборудование лаборатории"
+        },
+        {
           name: "budget_volume",
           label: "Объём бюджета в год",
           type: "single_choice",
@@ -383,7 +404,7 @@ export const questionnaire: QuestionnaireConfig = {
             "Распределение средств",
             "Контроль соблюдения",
             "Готовит данные для бюджета",
-            "Не управляет бюджетом"
+            "Не применимо / не управляю бюджетом"
           ])
         }
       ]
@@ -491,6 +512,7 @@ export const questionnaire: QuestionnaireConfig = {
               name: "position_or_department",
               label: "Должность / подразделение",
               type: "short_text",
+              autocomplete: "directory",
               help: "Укажите внутреннего участника взаимодействия: должность, подразделение или коллегиальный орган.",
               example: "Финансовое управление, деканаты, учебный офис"
             },
